@@ -5,10 +5,11 @@ const { initializeDatabase } = require('./config/database');
 const tentRoutes = require('./routes/tentRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const documentationRoutes = require('./routes/documentationRoutes');
+require('dotenv').config();
 
 // Initialize Express app
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT;
 
 // Middleware
 app.use(bodyParser.json());
