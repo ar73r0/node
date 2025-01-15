@@ -1,45 +1,144 @@
-// routes/documentationRoutes.js
 const express = require('express');
+const { check, validationResult } = require('express-validator');
+const { Booking, Tent } = require('../models');
 const router = express.Router();
 
-// CRUD endpoints for Booking
-router.get('/bookings', async (req, res) => {
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+  next();
+};
+
+router.get('/', async (req, res) => {
+  try {
     const bookings = await Booking.findAll({ include: Tent });
     res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
 });
 
 router.get('/bookings/:id', async (req, res) => {
-    const booking = await Booking.findByPk(req.params.id, { include: Tent });
-    if (!booking) return res.status(404).send('Booking not found');
+  try {
+    const { id } = req.params;
+    const booking = await Booking.findByPk(id, { include: Tent });
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
     res.json(booking);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch booking details', details: err });
+  }
 });
 
-router.post('/bookings', async (req, res) => {
+
+router.post(
+  '/',
+  [
+    check('customer_name')
+      .notEmpty().withMessage('Customer name is required')
+      .matches(/^[A-Za-z\s]+$/).withMessage('Customer name must not contain numbers')
+      .isLength({ min: 3 }).withMessage('Customer name must be at least 3 characters'),
+    check('start_date')
+      .isISO8601().withMessage('Start date must be a valid date')
+      .custom((value, { req }) => {
+        if (new Date(value) <= new Date()) {
+          throw new Error('Start date must be in the future');
+        }
+        return true;
+      }),
+    check('end_date')
+      .isISO8601().withMessage('End date must be a valid date')
+      .custom((value, { req }) => {
+        if (new Date(value) <= new Date(req.body.start_date)) {
+          throw new Error('End date must be after the start date');
+        }
+        return true;
+      }),
+    check('tent_id')
+      .isInt().withMessage('Tent ID must be a number')
+      .custom(async (value) => {
+        const tent = await Tent.findByPk(value);
+        if (!tent) {
+          throw new Error('Tent not found');
+        }
+        return true;
+      }),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
     try {
-        const booking = await Booking.create(req.body);
-        res.status(201).json(booking);
+      const { customer_name, start_date, end_date, tent_id } = req.body;
+      const newBooking = await Booking.create({ customer_name, start_date, end_date, tent_id });
+      res.status(201).json(newBooking);
     } catch (err) {
-        res.status(400).json(err);
+      res.status(400).json({ error: 'Failed to create booking', details: err });
     }
-});
+  }
+);
 
-router.put('/bookings/:id', async (req, res) => {
+router.put(
+  '/:id',
+  [
+    check('customer_name')
+      .optional()
+      .matches(/^[A-Za-z\s]+$/).withMessage('Customer name must not contain numbers')
+      .isLength({ min: 3 }).withMessage('Customer name must be at least 3 characters'),
+    check('start_date')
+      .optional()
+      .isISO8601().withMessage('Start date must be a valid date')
+      .custom((value, { req }) => {
+        if (value && new Date(value) <= new Date()) {
+          throw new Error('Start date must be in the future');
+        }
+        return true;
+      }),
+    check('end_date')
+      .optional()
+      .isISO8601().withMessage('End date must be a valid date')
+      .custom((value, { req }) => {
+        if (value && new Date(value) <= new Date(req.body.start_date)) {
+          throw new Error('End date must be after the start date');
+        }
+        return true;
+      }),
+    check('tent_id')
+      .optional()
+      .isInt().withMessage('Tent ID must be a number')
+      .custom(async (value) => {
+        if (value) {
+          const tent = await Tent.findByPk(value);
+          if (!tent) {
+            throw new Error('Tent not found');
+          }
+        }
+        return true;
+      }),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
     try {
-        const [updated] = await Booking.update(req.body, {
-        where: { id: req.params.id }
-        });
-        if (!updated) return res.status(404).send('Booking not found');
-        const updatedBooking = await Booking.findByPk(req.params.id);
-        res.json(updatedBooking);
-    } catch (err) {
-        res.status(400).json(err);
-    }
-});
+      const { id } = req.params;
+      const { customer_name, start_date, end_date, tent_id } = req.body;
 
-router.delete('/bookings/:id', async (req, res) => {
-    const deleted = await Booking.destroy({ where: { id: req.params.id } });
-    if (!deleted) return res.status(404).send('Booking not found');
-    res.status(204).send();
-});
+      const booking = await Booking.findByPk(id);
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      booking.customer_name = customer_name || booking.customer_name;
+      booking.start_date = start_date || booking.start_date;
+      booking.end_date = end_date || booking.end_date;
+      booking.tent_id = tent_id || booking.tent_id;
+      await booking.save();
+
+      res.json(booking);
+    } catch (err) {
+      res.status(400).json({ error: 'Failed to update booking', details: err });
+    }
+  }
+);
 
 module.exports = router;
